@@ -53,9 +53,8 @@ The code review covers:
 ## Setup
 
 ```bash
-# Clone the plugin and the SDK side by side
+# Clone the plugin project
 git clone git@github.com:ericlakich/squadron-plugin-devin.git
-git clone git@github.com:mlund01/squadron-sdk.git
 
 # Directory layout should be:
 #   squadron-plugin-devin/
