@@ -2,7 +2,7 @@ module github.com/ericlakich/squadron-plugin-devin
 
 go 1.23.0
 
-require github.com/mlund01/squadron-sdk v0.0.0
+require github.com/mlund01/squadron-sdk v0.0.30
 
 require (
 	github.com/fatih/color v1.7.0 // indirect
@@ -20,5 +20,3 @@ require (
 	google.golang.org/grpc v1.70.0 // indirect
 	google.golang.org/protobuf v1.36.4 // indirect
 )
-
-replace github.com/mlund01/squadron-sdk => ../squadron-sdk

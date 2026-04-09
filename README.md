@@ -48,7 +48,6 @@ The code review covers:
 - Go 1.23+
 - A [Devin AI](https://devin.ai) account with API access
 - Devin must already have access to the GitHub repos you want to review
-- The [squadron-sdk](https://github.com/mlund01/squadron-sdk) cloned as a sibling directory (see below)
 
 ## Setup
 
