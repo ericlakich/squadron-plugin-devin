@@ -94,7 +94,8 @@ Add the plugin to your Squadron HCL config:
 plugin "devin" {
   version = "local"
   settings = {
-    api_key = "<your-devin-api-key>"
+    api_key              = "<your-devin-api-key>"
+    poll_timeout_minutes = "60"
   }
 }
 ```
@@ -113,12 +114,13 @@ agent "reviewer" {
 | Setting | Required | Description |
 |---------|----------|-------------|
 | `api_key` | yes | Your Devin AI API key. Obtain from your Devin account settings. |
+| `poll_timeout_minutes` | no | Maximum time in minutes to wait for a Devin session to complete. Defaults to `60`. Increase for long-running development tasks. |
 
 ## How It Works
 
 1. The agent invokes a tool (`code_qa`, `code_review`, or `code_develop`) with the required parameters.
 2. The plugin creates a new Devin session via the [Devin API](https://docs.devin.ai/api-reference/overview) with a task-specific prompt.
-3. The plugin polls the session status every 15 seconds (up to 30 minutes) until Devin finishes.
+3. The plugin polls the session status every 15 seconds (up to `poll_timeout_minutes`, default 60) until Devin finishes.
 4. The final result is returned as a text summary.
 
 For `code_review`, Devin also posts inline review comments directly on the GitHub PR during its session.

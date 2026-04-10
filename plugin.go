@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
+	"time"
 
 	squadron "github.com/mlund01/squadron-sdk"
 	"github.com/ericlakich/squadron-plugin-devin/devin"
@@ -87,13 +89,18 @@ var tools = map[string]*squadron.ToolInfo{
 
 // Plugin implements the squadron.ToolProvider interface for Devin AI integration.
 type Plugin struct {
-	client *devin.Client
-	apiKey string
+	client      *devin.Client
+	apiKey      string
+	pollTimeout time.Duration
 }
 
 // Configure receives settings from the Squadron HCL config.
 // Required settings:
 //   - api_key: The Devin AI API key for authentication.
+//
+// Optional settings:
+//   - poll_timeout_minutes: Maximum time in minutes to wait for a Devin session
+//     to complete. Defaults to 60.
 func (p *Plugin) Configure(settings map[string]string) error {
 	apiKey, ok := settings["api_key"]
 	if !ok || apiKey == "" {
@@ -101,6 +108,19 @@ func (p *Plugin) Configure(settings map[string]string) error {
 	}
 	p.apiKey = apiKey
 	p.client = devin.NewClient(apiKey)
+
+	p.pollTimeout = 60 * time.Minute
+	if v, ok := settings["poll_timeout_minutes"]; ok && v != "" {
+		minutes, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("invalid poll_timeout_minutes %q: %w", v, err)
+		}
+		if minutes < 1 {
+			return fmt.Errorf("poll_timeout_minutes must be at least 1, got %d", minutes)
+		}
+		p.pollTimeout = time.Duration(minutes) * time.Minute
+	}
+
 	return nil
 }
 
@@ -180,7 +200,7 @@ func (p *Plugin) callCodeQA(ctx context.Context, payload string) (string, error)
 		return "", fmt.Errorf("create devin session: %w", err)
 	}
 
-	status, err := p.client.PollUntilDone(ctx, session.SessionID, 0)
+	status, err := p.client.PollUntilDone(ctx, session.SessionID, 0, p.pollTimeout)
 	if err != nil {
 		return "", fmt.Errorf("waiting for devin session %s: %w", session.SessionID, err)
 	}
@@ -208,7 +228,7 @@ func (p *Plugin) callCodeReview(ctx context.Context, payload string) (string, er
 		return "", fmt.Errorf("create devin session: %w", err)
 	}
 
-	status, err := p.client.PollUntilDone(ctx, session.SessionID, 0)
+	status, err := p.client.PollUntilDone(ctx, session.SessionID, 0, p.pollTimeout)
 	if err != nil {
 		return "", fmt.Errorf("waiting for devin session %s: %w", session.SessionID, err)
 	}
@@ -324,7 +344,7 @@ func (p *Plugin) callCodeDevelop(ctx context.Context, payload string) (string, e
 		return "", fmt.Errorf("create devin session: %w", err)
 	}
 
-	status, err := p.client.PollUntilDone(ctx, session.SessionID, 0)
+	status, err := p.client.PollUntilDone(ctx, session.SessionID, 0, p.pollTimeout)
 	if err != nil {
 		return "", fmt.Errorf("waiting for devin session %s: %w", session.SessionID, err)
 	}

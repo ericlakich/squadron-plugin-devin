@@ -16,7 +16,11 @@ const (
 
 	// Polling configuration
 	defaultPollInterval = 15 * time.Second
-	defaultPollTimeout  = 30 * time.Minute
+	defaultPollTimeout  = 60 * time.Minute
+
+	// maxPollErrors is the number of consecutive transient errors tolerated
+	// during polling before giving up.
+	maxPollErrors = 5
 )
 
 // Client communicates with the Devin AI API.
@@ -30,7 +34,7 @@ func NewClient(apiKey string) *Client {
 	return &Client{
 		apiKey: apiKey,
 		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout: 60 * time.Second,
 		},
 	}
 }
@@ -127,27 +131,37 @@ func (c *Client) GetSession(ctx context.Context, sessionID string) (*SessionStat
 // Terminal states are "finished", "stopped", and "blocked". Devin enters the
 // "blocked" state when it has completed its task and is waiting for a follow-up
 // prompt, so the plugin treats it as successful completion.
-func (c *Client) PollUntilDone(ctx context.Context, sessionID string, pollInterval time.Duration) (*SessionStatus, error) {
+func (c *Client) PollUntilDone(ctx context.Context, sessionID string, pollInterval, pollTimeout time.Duration) (*SessionStatus, error) {
 	if pollInterval == 0 {
 		pollInterval = defaultPollInterval
+	}
+	if pollTimeout == 0 {
+		pollTimeout = defaultPollTimeout
 	}
 
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 
-	timeout := time.After(defaultPollTimeout)
+	timeout := time.After(pollTimeout)
+	consecutiveErrors := 0
 
 	for {
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case <-timeout:
-			return nil, fmt.Errorf("polling timed out after %v for session %s", defaultPollTimeout, sessionID)
+			return nil, fmt.Errorf("polling timed out after %v for session %s", pollTimeout, sessionID)
 		case <-ticker.C:
 			status, err := c.GetSession(ctx, sessionID)
 			if err != nil {
-				return nil, fmt.Errorf("poll session %s: %w", sessionID, err)
+				consecutiveErrors++
+				if consecutiveErrors >= maxPollErrors {
+					return nil, fmt.Errorf("poll session %s: %d consecutive errors, last: %w", sessionID, consecutiveErrors, err)
+				}
+				// transient error, will retry on next tick
+				continue
 			}
+			consecutiveErrors = 0
 			switch status.StatusEnum {
 			case "finished", "stopped", "blocked":
 				return status, nil
