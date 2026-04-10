@@ -63,12 +63,13 @@ type CreateSessionResponse struct {
 
 // SessionStatus represents the current state of a Devin session.
 type SessionStatus struct {
-	SessionID    string         `json:"session_id"`
-	Status       string         `json:"status"`
-	Title        string         `json:"title"`
-	URL          string         `json:"url"`
-	PullRequests []PullRequest  `json:"pull_requests,omitempty"`
-	IsArchived   bool           `json:"is_archived"`
+	SessionID    string        `json:"session_id"`
+	Status       string        `json:"status"`
+	StatusDetail string        `json:"status_detail"`
+	Title        string        `json:"title"`
+	URL          string        `json:"url"`
+	PullRequests []PullRequest `json:"pull_requests,omitempty"`
+	IsArchived   bool          `json:"is_archived"`
 }
 
 // PullRequest contains PR information from a session.
@@ -160,10 +161,16 @@ func (c *Client) ArchiveSession(ctx context.Context, sessionID string) error {
 // PollUntilDone polls the session status until it reaches a terminal state
 // or the context is cancelled. It returns the final session status.
 //
-// Terminal states in the v3 API:
-//   - "exit": session completed successfully
+// Terminal conditions in the v3 API:
+//
+// Primary (by status):
+//   - "exit": session ended
 //   - "error": session encountered an error
-//   - "suspended": session finished its task and is idle (waiting for follow-up)
+//   - "suspended": session is suspended
+//
+// Secondary (by status_detail while status is still "running"):
+//   - "waiting_for_user": Devin finished its task and is waiting for follow-up
+//   - "finished": task completed
 func (c *Client) PollUntilDone(ctx context.Context, sessionID string, pollInterval, pollTimeout time.Duration) (*SessionStatus, error) {
 	if pollInterval == 0 {
 		pollInterval = defaultPollInterval
@@ -195,8 +202,18 @@ func (c *Client) PollUntilDone(ctx context.Context, sessionID string, pollInterv
 				continue
 			}
 			consecutiveErrors = 0
+
+			// Primary terminal states (session is no longer running)
 			switch status.Status {
 			case "exit", "error", "suspended":
+				return status, nil
+			}
+
+			// Secondary terminal: session is still "running" but Devin has
+			// finished its task and is waiting for further instructions.
+			// For Squadron's purposes this means the work is done.
+			switch status.StatusDetail {
+			case "waiting_for_user", "finished":
 				return status, nil
 			}
 			// still working (new, claimed, running, resuming), continue polling

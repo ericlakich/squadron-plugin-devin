@@ -382,7 +382,11 @@ func formatQAResult(sessionID, sessionURL string, status *devin.SessionStatus) s
 	b.WriteString("=== Devin QA Review Complete ===\n\n")
 	b.WriteString(fmt.Sprintf("Session: %s\n", sessionID))
 	b.WriteString(fmt.Sprintf("URL: %s\n", sessionURL))
-	b.WriteString(fmt.Sprintf("Status: %s\n\n", status.Status))
+	b.WriteString(fmt.Sprintf("Status: %s\n", status.Status))
+	if status.StatusDetail != "" {
+		b.WriteString(fmt.Sprintf("Status Detail: %s\n", status.StatusDetail))
+	}
+	b.WriteString("\n")
 
 	if status.Title != "" {
 		b.WriteString(fmt.Sprintf("Title: %s\n\n", status.Title))
@@ -401,7 +405,11 @@ func formatReviewResult(sessionID, sessionURL string, status *devin.SessionStatu
 	b.WriteString("=== Devin Code Review Complete ===\n\n")
 	b.WriteString(fmt.Sprintf("Session: %s\n", sessionID))
 	b.WriteString(fmt.Sprintf("URL: %s\n", sessionURL))
-	b.WriteString(fmt.Sprintf("Status: %s\n\n", status.Status))
+	b.WriteString(fmt.Sprintf("Status: %s\n", status.Status))
+	if status.StatusDetail != "" {
+		b.WriteString(fmt.Sprintf("Status Detail: %s\n", status.StatusDetail))
+	}
+	b.WriteString("\n")
 
 	if status.Title != "" {
 		b.WriteString(fmt.Sprintf("Title: %s\n\n", status.Title))
@@ -427,7 +435,11 @@ func formatDevelopResult(sessionID, sessionURL string, status *devin.SessionStat
 	b.WriteString("=== Devin Development Complete ===\n\n")
 	b.WriteString(fmt.Sprintf("Session: %s\n", sessionID))
 	b.WriteString(fmt.Sprintf("URL: %s\n", sessionURL))
-	b.WriteString(fmt.Sprintf("Status: %s\n\n", status.Status))
+	b.WriteString(fmt.Sprintf("Status: %s\n", status.Status))
+	if status.StatusDetail != "" {
+		b.WriteString(fmt.Sprintf("Status Detail: %s\n", status.StatusDetail))
+	}
+	b.WriteString("\n")
 
 	if status.Title != "" {
 		b.WriteString(fmt.Sprintf("Title: %s\n\n", status.Title))
