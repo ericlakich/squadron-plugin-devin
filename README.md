@@ -1,6 +1,6 @@
 # squadron-plugin-devin
 
-A [Squadron](https://github.com/mlund01/squadron-sdk) plugin that integrates [Devin AI](https://devin.ai) for automated pull request QA and code review.
+A [Squadron](https://github.com/mlund01/squadron-sdk) plugin that integrates [Devin AI](https://devin.ai) for automated pull request QA, code review, and code development.
 
 ## Tools
 
@@ -43,21 +43,38 @@ The code review covers:
 | `pr_url` | string | yes | Full URL of the GitHub PR (e.g. `https://github.com/org/repo/pull/123`) |
 | `instructions` | string | no | Additional instructions or focus areas for the code review |
 
+### `code_develop`
+
+Develops code on a repository. Devin clones the repo, implements the requested changes, runs tests, and opens a pull request with the completed work.
+
+Use this for:
+- Feature development
+- Bug fixes
+- Refactoring
+- Any code changes on a repository
+
+Devin will follow existing code conventions, add or update tests, and open a PR with a detailed description.
+
+**Parameters:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `repo_url` | string | yes | Full URL of the GitHub repository (e.g. `https://github.com/org/repo`) |
+| `task` | string | yes | Description of the development task to perform |
+| `branch` | string | no | Branch name for Devin to create. If omitted, Devin chooses an appropriate name. |
+| `instructions` | string | no | Additional context, constraints, or coding guidelines |
+
 ## Prerequisites
 
 - Go 1.23+
 - A [Devin AI](https://devin.ai) account with API access
-- Devin must already have access to the GitHub repos you want to review
+- Devin must already have access to the GitHub repos you want to review or develop on
 
 ## Setup
 
 ```bash
 # Clone the plugin project
 git clone git@github.com:ericlakich/squadron-plugin-devin.git
-
-# Directory layout should be:
-#   squadron-plugin-devin/
-#   squadron-sdk/
 
 # Build
 cd squadron-plugin-devin
@@ -87,7 +104,7 @@ Then attach the tools to an agent:
 ```hcl
 agent "reviewer" {
   model = models.anthropic.claude_sonnet_4
-  tools = [plugins.devin.code_qa, plugins.devin.code_review]
+  tools = [plugins.devin.code_qa, plugins.devin.code_review, plugins.devin.code_develop]
 }
 ```
 
@@ -99,14 +116,16 @@ agent "reviewer" {
 
 ## How It Works
 
-1. The agent invokes `code_qa` or `code_review` with a PR URL.
+1. The agent invokes a tool (`code_qa`, `code_review`, or `code_develop`) with the required parameters.
 2. The plugin creates a new Devin session via the [Devin API](https://docs.devin.ai/api-reference/overview) with a task-specific prompt.
 3. The plugin polls the session status every 15 seconds (up to 30 minutes) until Devin finishes.
 4. The final result is returned as a text summary.
 
 For `code_review`, Devin also posts inline review comments directly on the GitHub PR during its session.
 
-Both tools respect context cancellation, so Squadron can terminate long-running sessions cleanly.
+For `code_develop`, Devin clones the repo, implements the changes, and opens a pull request. The PR link is included in the result.
+
+All tools respect context cancellation, so Squadron can terminate long-running sessions cleanly.
 
 ## Project Structure
 
