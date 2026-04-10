@@ -54,6 +54,35 @@ var tools = map[string]*squadron.ToolInfo{
 			Required: []string{"pr_url"},
 		},
 	},
+	"code_develop": {
+		Name: "code_develop",
+		Description: "Develop code on a repository using Devin AI. " +
+			"Devin will clone the repo, implement the requested changes, run tests, " +
+			"and open a pull request with the completed work. " +
+			"Use this for feature development, bug fixes, refactoring, or any code changes.",
+		Schema: squadron.Schema{
+			Type: squadron.TypeObject,
+			Properties: squadron.PropertyMap{
+				"repo_url": {
+					Type:        squadron.TypeString,
+					Description: "The full URL of the GitHub repository to develop on (e.g. https://github.com/org/repo)",
+				},
+				"task": {
+					Type:        squadron.TypeString,
+					Description: "A description of the development task to perform (e.g. 'Add pagination to the /users API endpoint')",
+				},
+				"branch": {
+					Type:        squadron.TypeString,
+					Description: "Optional branch name for Devin to create. If not specified, Devin will choose an appropriate name.",
+				},
+				"instructions": {
+					Type:        squadron.TypeString,
+					Description: "Optional additional context, constraints, or coding guidelines for the task",
+				},
+			},
+			Required: []string{"repo_url", "task"},
+		},
+	},
 }
 
 // Plugin implements the squadron.ToolProvider interface for Devin AI integration.
@@ -86,6 +115,8 @@ func (p *Plugin) Call(ctx context.Context, toolName string, payload string) (str
 		return p.callCodeQA(ctx, payload)
 	case "code_review":
 		return p.callCodeReview(ctx, payload)
+	case "code_develop":
+		return p.callCodeDevelop(ctx, payload)
 	default:
 		return "", fmt.Errorf("unknown tool: %s", toolName)
 	}
@@ -118,6 +149,14 @@ type codeQAParams struct {
 // codeReviewParams are the parameters for the code_review tool.
 type codeReviewParams struct {
 	PRURL        string `json:"pr_url"`
+	Instructions string `json:"instructions,omitempty"`
+}
+
+// codeDevelopParams are the parameters for the code_develop tool.
+type codeDevelopParams struct {
+	RepoURL      string `json:"repo_url"`
+	Task         string `json:"task"`
+	Branch       string `json:"branch,omitempty"`
 	Instructions string `json:"instructions,omitempty"`
 }
 
@@ -256,6 +295,107 @@ func formatQAResult(sessionID, sessionURL string, status *devin.SessionStatus) s
 	}
 
 	b.WriteString("View the full Devin session for detailed findings: ")
+	b.WriteString(sessionURL)
+	b.WriteString("\n")
+
+	return b.String()
+}
+
+// callCodeDevelop creates a Devin session to develop code on a repo and polls until completion.
+func (p *Plugin) callCodeDevelop(ctx context.Context, payload string) (string, error) {
+	var params codeDevelopParams
+	if err := json.Unmarshal([]byte(payload), &params); err != nil {
+		return "", fmt.Errorf("invalid payload: %w", err)
+	}
+	if params.RepoURL == "" {
+		return "", fmt.Errorf("repo_url is required")
+	}
+	if params.Task == "" {
+		return "", fmt.Errorf("task is required")
+	}
+
+	prompt := buildDevelopPrompt(params.RepoURL, params.Task, params.Branch, params.Instructions)
+
+	session, err := p.client.CreateSession(ctx, devin.CreateSessionRequest{
+		Prompt:     prompt,
+		Idempotent: false,
+	})
+	if err != nil {
+		return "", fmt.Errorf("create devin session: %w", err)
+	}
+
+	status, err := p.client.PollUntilDone(ctx, session.SessionID, 0)
+	if err != nil {
+		return "", fmt.Errorf("waiting for devin session %s: %w", session.SessionID, err)
+	}
+
+	return formatDevelopResult(session.SessionID, session.URL, status), nil
+}
+
+// buildDevelopPrompt constructs the Devin prompt for a development task.
+func buildDevelopPrompt(repoURL, task, branch, instructions string) string {
+	var b strings.Builder
+	b.WriteString("You are working on the repository: ")
+	b.WriteString(repoURL)
+	b.WriteString("\n\n")
+	b.WriteString("Task: ")
+	b.WriteString(task)
+	b.WriteString("\n\n")
+	b.WriteString("Please complete this development task by following these steps:\n")
+	b.WriteString("1. Clone the repository and understand the existing codebase structure\n")
+	b.WriteString("2. Create a new branch for your changes")
+	if branch != "" {
+		b.WriteString(" named: ")
+		b.WriteString(branch)
+	}
+	b.WriteString("\n")
+	b.WriteString("3. Implement the requested changes with clean, well-structured code\n")
+	b.WriteString("4. Follow existing code conventions and patterns in the repository\n")
+	b.WriteString("5. Add or update tests to cover the changes\n")
+	b.WriteString("6. Run the existing test suite and ensure all tests pass\n")
+	b.WriteString("7. Commit your changes with clear, descriptive commit messages\n")
+	b.WriteString("8. Open a pull request with a detailed description of the changes\n\n")
+
+	if instructions != "" {
+		b.WriteString("Additional instructions: ")
+		b.WriteString(instructions)
+		b.WriteString("\n\n")
+	}
+
+	b.WriteString("When complete, provide a summary of the changes made and the PR link.\n")
+
+	return b.String()
+}
+
+// formatDevelopResult formats the development session result into a readable text summary.
+func formatDevelopResult(sessionID, sessionURL string, status *devin.SessionStatus) string {
+	var b strings.Builder
+	b.WriteString("=== Devin Development Complete ===\n\n")
+	b.WriteString(fmt.Sprintf("Session: %s\n", sessionID))
+	b.WriteString(fmt.Sprintf("URL: %s\n", sessionURL))
+	b.WriteString(fmt.Sprintf("Status: %s\n\n", status.StatusEnum))
+
+	if status.Title != "" {
+		b.WriteString(fmt.Sprintf("Title: %s\n\n", status.Title))
+	}
+
+	if status.PullRequest != nil && status.PullRequest.URL != "" {
+		b.WriteString(fmt.Sprintf("Pull Request: %s\n\n", status.PullRequest.URL))
+	}
+
+	if len(status.StructuredOutput) > 0 && string(status.StructuredOutput) != "null" {
+		b.WriteString("Structured Output:\n")
+		var pretty json.RawMessage
+		if err := json.Unmarshal(status.StructuredOutput, &pretty); err == nil {
+			formatted, _ := json.MarshalIndent(pretty, "", "  ")
+			b.WriteString(string(formatted))
+		} else {
+			b.WriteString(string(status.StructuredOutput))
+		}
+		b.WriteString("\n\n")
+	}
+
+	b.WriteString("View the full Devin session for details: ")
 	b.WriteString(sessionURL)
 	b.WriteString("\n")
 
