@@ -1,4 +1,4 @@
-// Package devin provides an HTTP client for the Devin AI API.
+// Package devin provides an HTTP client for the Devin AI v3 API.
 package devin
 
 import (
@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	baseURL = "https://api.devin.ai/v1"
+	baseURL = "https://api.devin.ai/v3"
 
 	// Polling configuration
 	defaultPollInterval = 15 * time.Second
@@ -23,48 +23,58 @@ const (
 	maxPollErrors = 5
 )
 
-// Client communicates with the Devin AI API.
+// Client communicates with the Devin AI v3 API.
 type Client struct {
 	apiKey     string
+	orgID      string
 	httpClient *http.Client
 }
 
 // NewClient creates a new Devin API client.
-func NewClient(apiKey string) *Client {
+func NewClient(apiKey, orgID string) *Client {
 	return &Client{
 		apiKey: apiKey,
+		orgID:  orgID,
 		httpClient: &http.Client{
 			Timeout: 60 * time.Second,
 		},
 	}
 }
 
+// orgURL returns the base URL for organization-scoped endpoints.
+func (c *Client) orgURL() string {
+	return baseURL + "/organizations/" + c.orgID
+}
+
 // CreateSessionRequest is the payload for creating a new Devin session.
 type CreateSessionRequest struct {
-	Prompt     string `json:"prompt"`
-	Idempotent bool   `json:"idempotent,omitempty"`
+	Prompt string   `json:"prompt"`
+	Repos  []string `json:"repos,omitempty"`
+	Title  string   `json:"title,omitempty"`
+	Tags   []string `json:"tags,omitempty"`
 }
 
 // CreateSessionResponse is returned when a session is created.
 type CreateSessionResponse struct {
-	SessionID    string `json:"session_id"`
-	URL          string `json:"url"`
-	IsNewSession bool   `json:"is_new_session"`
+	SessionID string `json:"session_id"`
+	URL       string `json:"url"`
+	Status    string `json:"status"`
 }
 
 // SessionStatus represents the current state of a Devin session.
 type SessionStatus struct {
-	SessionID        string          `json:"session_id"`
-	Status           string          `json:"status"`
-	StatusEnum       string          `json:"status_enum"`
-	Title            string          `json:"title"`
-	StructuredOutput json.RawMessage `json:"structured_output,omitempty"`
-	PullRequest      *PullRequest    `json:"pull_request,omitempty"`
+	SessionID    string         `json:"session_id"`
+	Status       string         `json:"status"`
+	Title        string         `json:"title"`
+	URL          string         `json:"url"`
+	PullRequests []PullRequest  `json:"pull_requests,omitempty"`
+	IsArchived   bool           `json:"is_archived"`
 }
 
-// PullRequest contains PR information from a completed session.
+// PullRequest contains PR information from a session.
 type PullRequest struct {
-	URL string `json:"url"`
+	URL   string `json:"pr_url"`
+	State string `json:"pr_state"`
 }
 
 // CreateSession creates a new Devin session with the given prompt.
@@ -74,7 +84,7 @@ func (c *Client) CreateSession(ctx context.Context, req CreateSessionRequest) (*
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/sessions", bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.orgURL()+"/sessions", bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
@@ -101,7 +111,7 @@ func (c *Client) CreateSession(ctx context.Context, req CreateSessionRequest) (*
 
 // GetSession retrieves the current status of a Devin session.
 func (c *Client) GetSession(ctx context.Context, sessionID string) (*SessionStatus, error) {
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/session/"+sessionID, nil)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, c.orgURL()+"/sessions/"+sessionID, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
@@ -125,12 +135,35 @@ func (c *Client) GetSession(ctx context.Context, sessionID string) (*SessionStat
 	return &result, nil
 }
 
+// ArchiveSession archives a completed Devin session.
+func (c *Client) ArchiveSession(ctx context.Context, sessionID string) error {
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.orgURL()+"/sessions/"+sessionID+"/archive", nil)
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("devin API error (status %d): %s", resp.StatusCode, string(respBody))
+	}
+
+	return nil
+}
+
 // PollUntilDone polls the session status until it reaches a terminal state
 // or the context is cancelled. It returns the final session status.
 //
-// Terminal states are "finished", "stopped", and "blocked". Devin enters the
-// "blocked" state when it has completed its task and is waiting for a follow-up
-// prompt, so the plugin treats it as successful completion.
+// Terminal states in the v3 API:
+//   - "exit": session completed successfully
+//   - "error": session encountered an error
+//   - "suspended": session finished its task and is idle (waiting for follow-up)
 func (c *Client) PollUntilDone(ctx context.Context, sessionID string, pollInterval, pollTimeout time.Duration) (*SessionStatus, error) {
 	if pollInterval == 0 {
 		pollInterval = defaultPollInterval
@@ -162,11 +195,11 @@ func (c *Client) PollUntilDone(ctx context.Context, sessionID string, pollInterv
 				continue
 			}
 			consecutiveErrors = 0
-			switch status.StatusEnum {
-			case "finished", "stopped", "blocked":
+			switch status.Status {
+			case "exit", "error", "suspended":
 				return status, nil
 			}
-			// still working, continue polling
+			// still working (new, claimed, running, resuming), continue polling
 		}
 	}
 }

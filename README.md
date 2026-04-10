@@ -2,6 +2,8 @@
 
 A [Squadron](https://github.com/mlund01/squadron-sdk) plugin that integrates [Devin AI](https://devin.ai) for automated pull request QA, code review, and code development.
 
+This plugin uses the [Devin v3 API](https://docs.devin.ai/api-reference/overview).
+
 ## Tools
 
 ### `code_qa`
@@ -53,7 +55,7 @@ Use this for:
 - Refactoring
 - Any code changes on a repository
 
-Devin will follow existing code conventions, add or update tests, and open a PR with a detailed description.
+Devin will follow existing code conventions, add or update tests, and open a PR with a detailed description. The repository is passed to Devin via the v3 `repos` field, so Devin has direct access to it.
 
 **Parameters:**
 
@@ -67,10 +69,29 @@ Devin will follow existing code conventions, add or update tests, and open a PR 
 ## Prerequisites
 
 - Go 1.23+
-- A [Devin AI](https://devin.ai) account with API access
+- A [Devin AI](https://devin.ai) account with v3 API access
+- A Devin **service user** with an API key (starts with `cog_`)
+- Your Devin **organization ID**
 - Devin must already have access to the GitHub repos you want to review or develop on
 
-## Setup
+## Devin v3 API Setup
+
+The v3 API uses service user tokens instead of personal API keys. Follow these steps to get set up:
+
+1. **Create a service user** in your Devin organization:
+   - Go to your Devin dashboard at [app.devin.ai](https://app.devin.ai)
+   - Navigate to **Settings > Service Users**
+   - Create a new service user and assign it a role with the `UseDevinSessions` permission
+
+2. **Copy the API key** — it starts with `cog_` and is only shown once. Store it securely.
+
+3. **Find your organization ID** — visible on the **Settings > Service Users** page in the Devin dashboard.
+
+4. **Grant repo access** — ensure Devin has access to the GitHub repositories you want to work with. This is configured in your Devin organization's GitHub integration settings.
+
+For more details, see the [Devin API documentation](https://docs.devin.ai/api-reference/overview).
+
+## Build
 
 ```bash
 # Clone the plugin project
@@ -94,7 +115,8 @@ Add the plugin to your Squadron HCL config:
 plugin "devin" {
   version = "local"
   settings = {
-    api_key              = "<your-devin-api-key>"
+    api_key              = "<your-devin-service-user-key>"
+    org_id               = "<your-devin-org-id>"
     poll_timeout_minutes = "60"
   }
 }
@@ -113,21 +135,22 @@ agent "reviewer" {
 
 | Setting | Required | Description |
 |---------|----------|-------------|
-| `api_key` | yes | Your Devin AI API key. Obtain from your Devin account settings. |
+| `api_key` | yes | Devin service user API key (starts with `cog_`). Created under **Settings > Service Users** in the Devin dashboard. |
+| `org_id` | yes | Devin organization ID. Found on the **Settings > Service Users** page in the Devin dashboard. |
 | `poll_timeout_minutes` | no | Maximum time in minutes to wait for a Devin session to complete. Defaults to `60`. Increase for long-running development tasks. |
 
 ## How It Works
 
 1. The agent invokes a tool (`code_qa`, `code_review`, or `code_develop`) with the required parameters.
-2. The plugin creates a new Devin session via the [Devin API](https://docs.devin.ai/api-reference/overview) with a task-specific prompt.
+2. The plugin creates a new Devin session via the [Devin v3 API](https://docs.devin.ai/api-reference/overview) (`POST /v3/organizations/{org_id}/sessions`).
 3. The plugin polls the session status every 15 seconds (up to `poll_timeout_minutes`, default 60) until Devin finishes.
-4. The final result is returned as a text summary.
+4. The session is archived and the result is returned as a text summary.
 
 For `code_review`, Devin also posts inline review comments directly on the GitHub PR during its session.
 
-For `code_develop`, Devin clones the repo, implements the changes, and opens a pull request. The PR link is included in the result.
+For `code_develop`, the repository URL is passed via the v3 `repos` field so Devin has direct access. Devin implements the changes and opens a pull request. The PR link is included in the result.
 
-All tools respect context cancellation, so Squadron can terminate long-running sessions cleanly.
+All tools respect context cancellation, so Squadron can terminate long-running sessions cleanly. Transient API errors during polling are retried automatically (up to 5 consecutive failures).
 
 ## Project Structure
 
@@ -136,7 +159,7 @@ squadron-plugin-devin/
   main.go          # Entry point - registers the plugin with Squadron
   plugin.go        # ToolProvider implementation, tool definitions, prompt builders
   devin/
-    client.go      # HTTP client for the Devin AI API (v1)
+    client.go      # HTTP client for the Devin AI v3 API
   go.mod
   go.sum
 ```
