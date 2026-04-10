@@ -123,6 +123,10 @@ func (c *Client) GetSession(ctx context.Context, sessionID string) (*SessionStat
 
 // PollUntilDone polls the session status until it reaches a terminal state
 // or the context is cancelled. It returns the final session status.
+//
+// Terminal states are "finished", "stopped", and "blocked". Devin enters the
+// "blocked" state when it has completed its task and is waiting for a follow-up
+// prompt, so the plugin treats it as successful completion.
 func (c *Client) PollUntilDone(ctx context.Context, sessionID string, pollInterval time.Duration) (*SessionStatus, error) {
 	if pollInterval == 0 {
 		pollInterval = defaultPollInterval
@@ -145,10 +149,10 @@ func (c *Client) PollUntilDone(ctx context.Context, sessionID string, pollInterv
 				return nil, fmt.Errorf("poll session %s: %w", sessionID, err)
 			}
 			switch status.StatusEnum {
-			case "finished", "stopped":
+			case "finished", "stopped", "blocked":
 				return status, nil
 			}
-			// still working (or blocked waiting for user input), continue polling
+			// still working, continue polling
 		}
 	}
 }
