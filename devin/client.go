@@ -147,11 +147,8 @@ func (c *Client) PollUntilDone(ctx context.Context, sessionID string, pollInterv
 			switch status.StatusEnum {
 			case "finished", "stopped":
 				return status, nil
-			case "blocked":
-				return status, fmt.Errorf("session %s is blocked and needs manual intervention (url: %s)",
-					sessionID, "https://app.devin.ai/sessions/"+sessionID)
 			}
-			// still working, continue polling
+			// still working (or blocked waiting for user input), continue polling
 		}
 	}
 }
