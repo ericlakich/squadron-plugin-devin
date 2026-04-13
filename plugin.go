@@ -85,6 +85,23 @@ var tools = map[string]*squadron.ToolInfo{
 			Required: []string{"repo_url", "task"},
 		},
 	},
+	"check_session": {
+		Name: "check_session",
+		Description: "Check the status of an existing Devin session. " +
+			"Returns the full session status including current state, pull requests, " +
+			"and Devin's messages. Use this to inspect a session that was previously " +
+			"created by another tool or to check on a long-running session.",
+		Schema: squadron.Schema{
+			Type: squadron.TypeObject,
+			Properties: squadron.PropertyMap{
+				"session_id": {
+					Type:        squadron.TypeString,
+					Description: "The Devin session ID (e.g. 32fee96e7997499ca010301aa50eefce)",
+				},
+			},
+			Required: []string{"session_id"},
+		},
+	},
 }
 
 // Plugin implements the squadron.ToolProvider interface for Devin AI integration.
@@ -142,6 +159,8 @@ func (p *Plugin) Call(ctx context.Context, toolName string, payload string) (str
 		return p.callCodeReview(ctx, payload)
 	case "code_develop":
 		return p.callCodeDevelop(ctx, payload)
+	case "check_session":
+		return p.callCheckSession(ctx, payload)
 	default:
 		return "", fmt.Errorf("unknown tool: %s", toolName)
 	}
@@ -183,6 +202,11 @@ type codeDevelopParams struct {
 	Task         string `json:"task"`
 	Branch       string `json:"branch,omitempty"`
 	Instructions string `json:"instructions,omitempty"`
+}
+
+// checkSessionParams are the parameters for the check_session tool.
+type checkSessionParams struct {
+	SessionID string `json:"session_id"`
 }
 
 // callCodeQA creates a Devin session to perform QA on a PR and polls until completion.
@@ -280,6 +304,26 @@ func (p *Plugin) callCodeDevelop(ctx context.Context, payload string) (string, e
 	p.client.ArchiveSession(ctx, session.SessionID)
 
 	return formatDevelopResult(session.SessionID, session.URL, status, messages), nil
+}
+
+// callCheckSession retrieves the full status and messages for an existing Devin session.
+func (p *Plugin) callCheckSession(ctx context.Context, payload string) (string, error) {
+	var params checkSessionParams
+	if err := json.Unmarshal([]byte(payload), &params); err != nil {
+		return "", fmt.Errorf("invalid payload: %w", err)
+	}
+	if params.SessionID == "" {
+		return "", fmt.Errorf("session_id is required")
+	}
+
+	status, err := p.client.GetSession(ctx, params.SessionID)
+	if err != nil {
+		return "", fmt.Errorf("get session %s: %w", params.SessionID, err)
+	}
+
+	messages, _ := p.client.GetMessages(ctx, params.SessionID)
+
+	return formatCheckSessionResult(params.SessionID, status, messages), nil
 }
 
 // buildQAPrompt constructs the Devin prompt for a QA review.
@@ -490,6 +534,39 @@ func formatDevelopResult(sessionID, sessionURL string, status *devin.SessionStat
 	b.WriteString("View the full Devin session for details: ")
 	b.WriteString(sessionURL)
 	b.WriteString("\n")
+
+	return b.String()
+}
+
+// formatCheckSessionResult formats a session status check into a readable text summary.
+func formatCheckSessionResult(sessionID string, status *devin.SessionStatus, messages []devin.Message) string {
+	var b strings.Builder
+	b.WriteString("=== Devin Session Status ===\n\n")
+	b.WriteString(fmt.Sprintf("Session: %s\n", sessionID))
+	if status.URL != "" {
+		b.WriteString(fmt.Sprintf("URL: %s\n", status.URL))
+	}
+	b.WriteString(fmt.Sprintf("Status: %s\n", status.Status))
+	if status.StatusDetail != "" {
+		b.WriteString(fmt.Sprintf("Status Detail: %s\n", status.StatusDetail))
+	}
+	b.WriteString(fmt.Sprintf("Archived: %v\n", status.IsArchived))
+	b.WriteString("\n")
+
+	if status.Title != "" {
+		b.WriteString(fmt.Sprintf("Title: %s\n\n", status.Title))
+	}
+
+	if prs := formatPullRequests(status.PullRequests); prs != "" {
+		b.WriteString("Pull Requests:\n")
+		b.WriteString(prs)
+		b.WriteString("\n")
+	}
+
+	if msgText := formatMessages(messages); msgText != "" {
+		b.WriteString("--- Devin's Response ---\n\n")
+		b.WriteString(msgText)
+	}
 
 	return b.String()
 }
