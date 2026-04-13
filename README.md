@@ -66,6 +66,18 @@ Devin will follow existing code conventions, add or update tests, and open a PR 
 | `branch` | string | no | Branch name for Devin to create. If omitted, Devin chooses an appropriate name. |
 | `instructions` | string | no | Additional context, constraints, or coding guidelines |
 
+### `check_session`
+
+Checks the status of an existing Devin session. Returns the full session status including current state, pull requests, and Devin's messages. Use this to inspect a session that was previously created by another tool or to check on a long-running session.
+
+The session ID is returned by `code_qa`, `code_review`, and `code_develop` when they create a session.
+
+**Parameters:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `session_id` | string | yes | The Devin session ID (e.g. `32fee96e7997499ca010301aa50eefce`) |
+
 ## Prerequisites
 
 - Go 1.23+
@@ -127,7 +139,7 @@ Then attach the tools to an agent:
 ```hcl
 agent "reviewer" {
   model = models.anthropic.claude_sonnet_4
-  tools = [plugins.devin.code_qa, plugins.devin.code_review, plugins.devin.code_develop]
+  tools = [plugins.devin.code_qa, plugins.devin.code_review, plugins.devin.code_develop, plugins.devin.check_session]
 }
 ```
 
@@ -144,11 +156,13 @@ agent "reviewer" {
 1. The agent invokes a tool (`code_qa`, `code_review`, or `code_develop`) with the required parameters.
 2. The plugin creates a new Devin session via the [Devin v3 API](https://docs.devin.ai/api-reference/overview) (`POST /v3/organizations/{org_id}/sessions`).
 3. The plugin polls the session status every 15 seconds (up to `poll_timeout_minutes`, default 60) until Devin finishes.
-4. The session is archived and the result is returned as a text summary.
+4. The session is archived and the result — including Devin's messages — is returned as a text summary.
 
 For `code_review`, Devin also posts inline review comments directly on the GitHub PR during its session.
 
 For `code_develop`, the repository URL is passed via the v3 `repos` field so Devin has direct access. Devin implements the changes and opens a pull request. The PR link is included in the result.
+
+For `check_session`, the plugin fetches the current status and message history for an existing session without creating a new one. This is useful for inspecting sessions created by other tools or checking on long-running work.
 
 All tools respect context cancellation, so Squadron can terminate long-running sessions cleanly. Transient API errors during polling are retried automatically (up to 5 consecutive failures).
 
