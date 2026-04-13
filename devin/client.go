@@ -12,7 +12,8 @@ import (
 )
 
 const (
-	baseURL = "https://api.devin.ai/v3"
+	baseURL   = "https://api.devin.ai/v3"
+	v1BaseURL = "https://api.devin.ai/v1"
 
 	// Polling configuration
 	defaultPollInterval = 15 * time.Second
@@ -144,14 +145,20 @@ func (c *Client) GetSession(ctx context.Context, sessionID string) (*SessionStat
 	return &result, nil
 }
 
-// messagesResponse wraps the messages array returned by the v3 API.
-type messagesResponse struct {
+// v1SessionResponse is the response from the v1 GET session endpoint,
+// which includes messages in the response body (unlike the v3 endpoint).
+type v1SessionResponse struct {
 	Messages []Message `json:"messages"`
 }
 
 // GetMessages retrieves the message history for a Devin session.
+//
+// The v3 API does not provide a GET endpoint for session messages, so this
+// falls back to the v1 API (GET /v1/sessions/{id}) which includes a messages
+// array directly in the session response. The v1 endpoint accepts service
+// user tokens (cog_) used by v3.
 func (c *Client) GetMessages(ctx context.Context, sessionID string) ([]Message, error) {
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, c.orgURL()+"/sessions/"+sessionID+"/messages", nil)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, v1BaseURL+"/sessions/"+sessionID, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
@@ -168,22 +175,11 @@ func (c *Client) GetMessages(ctx context.Context, sessionID string) ([]Message, 
 		return nil, fmt.Errorf("devin API error (status %d): %s", resp.StatusCode, string(respBody))
 	}
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read response: %w", err)
+	var result v1SessionResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
 	}
-
-	// The v3 API may return messages as a wrapped object or a bare array.
-	var wrapped messagesResponse
-	if err := json.Unmarshal(body, &wrapped); err == nil && wrapped.Messages != nil {
-		return wrapped.Messages, nil
-	}
-
-	var result []Message
-	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, fmt.Errorf("decode response: unable to parse messages: %s", string(body))
-	}
-	return result, nil
+	return result.Messages, nil
 }
 
 // ArchiveSession archives a completed Devin session.
