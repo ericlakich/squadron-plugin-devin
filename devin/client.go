@@ -167,6 +167,7 @@ func (c *Client) ArchiveSession(ctx context.Context, sessionID string) error {
 //   - "exit": session ended
 //   - "error": session encountered an error
 //   - "suspended": session is suspended
+//   - "sleeping": session finished and went to sleep
 //
 // Secondary (by status_detail while status is still "running"):
 //   - "waiting_for_user": Devin finished its task and is waiting for follow-up
@@ -205,7 +206,7 @@ func (c *Client) PollUntilDone(ctx context.Context, sessionID string, pollInterv
 
 			// Primary terminal states (session is no longer running)
 			switch status.Status {
-			case "exit", "error", "suspended":
+			case "exit", "error", "suspended", "sleeping":
 				return status, nil
 			}
 
