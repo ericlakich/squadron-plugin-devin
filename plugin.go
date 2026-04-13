@@ -321,9 +321,9 @@ func (p *Plugin) callCheckSession(ctx context.Context, payload string) (string, 
 		return "", fmt.Errorf("get session %s: %w", params.SessionID, err)
 	}
 
-	messages, _ := p.client.GetMessages(ctx, params.SessionID)
+	messages, msgErr := p.client.GetMessages(ctx, params.SessionID)
 
-	return formatCheckSessionResult(params.SessionID, status, messages), nil
+	return formatCheckSessionResult(params.SessionID, status, messages, msgErr), nil
 }
 
 // buildQAPrompt constructs the Devin prompt for a QA review.
@@ -539,7 +539,7 @@ func formatDevelopResult(sessionID, sessionURL string, status *devin.SessionStat
 }
 
 // formatCheckSessionResult formats a session status check into a readable text summary.
-func formatCheckSessionResult(sessionID string, status *devin.SessionStatus, messages []devin.Message) string {
+func formatCheckSessionResult(sessionID string, status *devin.SessionStatus, messages []devin.Message, msgErr error) string {
 	var b strings.Builder
 	b.WriteString("=== Devin Session Status ===\n\n")
 	b.WriteString(fmt.Sprintf("Session: %s\n", sessionID))
@@ -563,9 +563,19 @@ func formatCheckSessionResult(sessionID string, status *devin.SessionStatus, mes
 		b.WriteString("\n")
 	}
 
-	if msgText := formatMessages(messages); msgText != "" {
-		b.WriteString("--- Devin's Response ---\n\n")
+	b.WriteString("--- Devin's Response ---\n\n")
+	if msgErr != nil {
+		b.WriteString("Devin returned an error in messaging. Review this session at ")
+		if status.URL != "" {
+			b.WriteString(status.URL)
+		} else {
+			b.WriteString("https://app.devin.ai/sessions/" + sessionID)
+		}
+		b.WriteString("\n")
+	} else if msgText := formatMessages(messages); msgText != "" {
 		b.WriteString(msgText)
+	} else {
+		b.WriteString("Devin did not return a message. Continue to the next task.\n")
 	}
 
 	return b.String()
