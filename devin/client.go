@@ -144,6 +144,11 @@ func (c *Client) GetSession(ctx context.Context, sessionID string) (*SessionStat
 	return &result, nil
 }
 
+// messagesResponse wraps the messages array returned by the v3 API.
+type messagesResponse struct {
+	Messages []Message `json:"messages"`
+}
+
 // GetMessages retrieves the message history for a Devin session.
 func (c *Client) GetMessages(ctx context.Context, sessionID string) ([]Message, error) {
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, c.orgURL()+"/sessions/"+sessionID+"/messages", nil)
@@ -163,9 +168,20 @@ func (c *Client) GetMessages(ctx context.Context, sessionID string) ([]Message, 
 		return nil, fmt.Errorf("devin API error (status %d): %s", resp.StatusCode, string(respBody))
 	}
 
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	// The v3 API may return messages as a wrapped object or a bare array.
+	var wrapped messagesResponse
+	if err := json.Unmarshal(body, &wrapped); err == nil && wrapped.Messages != nil {
+		return wrapped.Messages, nil
+	}
+
 	var result []Message
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decode response: %w", err)
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("decode response: unable to parse messages: %s", string(body))
 	}
 	return result, nil
 }
