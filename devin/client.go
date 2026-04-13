@@ -78,6 +78,14 @@ type PullRequest struct {
 	State string `json:"pr_state"`
 }
 
+// Message represents a single message in a Devin session conversation.
+type Message struct {
+	Type      string `json:"type"`
+	EventID   string `json:"event_id"`
+	Content   string `json:"message"`
+	Timestamp string `json:"timestamp"`
+}
+
 // CreateSession creates a new Devin session with the given prompt.
 func (c *Client) CreateSession(ctx context.Context, req CreateSessionRequest) (*CreateSessionResponse, error) {
 	body, err := json.Marshal(req)
@@ -134,6 +142,32 @@ func (c *Client) GetSession(ctx context.Context, sessionID string) (*SessionStat
 		return nil, fmt.Errorf("decode response: %w", err)
 	}
 	return &result, nil
+}
+
+// GetMessages retrieves the message history for a Devin session.
+func (c *Client) GetMessages(ctx context.Context, sessionID string) ([]Message, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, c.orgURL()+"/sessions/"+sessionID+"/messages", nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("devin API error (status %d): %s", resp.StatusCode, string(respBody))
+	}
+
+	var result []Message
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	return result, nil
 }
 
 // ArchiveSession archives a completed Devin session.

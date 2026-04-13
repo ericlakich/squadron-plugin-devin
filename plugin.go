@@ -209,9 +209,11 @@ func (p *Plugin) callCodeQA(ctx context.Context, payload string) (string, error)
 		return "", fmt.Errorf("waiting for devin session %s: %w", session.SessionID, err)
 	}
 
+	messages, _ := p.client.GetMessages(ctx, session.SessionID)
+
 	p.client.ArchiveSession(ctx, session.SessionID)
 
-	return formatQAResult(session.SessionID, session.URL, status), nil
+	return formatQAResult(session.SessionID, session.URL, status, messages), nil
 }
 
 // callCodeReview creates a Devin session to review a PR and polls until completion.
@@ -238,9 +240,11 @@ func (p *Plugin) callCodeReview(ctx context.Context, payload string) (string, er
 		return "", fmt.Errorf("waiting for devin session %s: %w", session.SessionID, err)
 	}
 
+	messages, _ := p.client.GetMessages(ctx, session.SessionID)
+
 	p.client.ArchiveSession(ctx, session.SessionID)
 
-	return formatReviewResult(session.SessionID, session.URL, status), nil
+	return formatReviewResult(session.SessionID, session.URL, status, messages), nil
 }
 
 // callCodeDevelop creates a Devin session to develop code on a repo and polls until completion.
@@ -271,9 +275,11 @@ func (p *Plugin) callCodeDevelop(ctx context.Context, payload string) (string, e
 		return "", fmt.Errorf("waiting for devin session %s: %w", session.SessionID, err)
 	}
 
+	messages, _ := p.client.GetMessages(ctx, session.SessionID)
+
 	p.client.ArchiveSession(ctx, session.SessionID)
 
-	return formatDevelopResult(session.SessionID, session.URL, status), nil
+	return formatDevelopResult(session.SessionID, session.URL, status, messages), nil
 }
 
 // buildQAPrompt constructs the Devin prompt for a QA review.
@@ -376,8 +382,23 @@ func formatPullRequests(prs []devin.PullRequest) string {
 	return b.String()
 }
 
+// formatMessages formats Devin's messages into a readable conversation log.
+// It includes only devin_message entries (Devin's own responses), skipping
+// user_message entries (our prompts).
+func formatMessages(messages []devin.Message) string {
+	var b strings.Builder
+	for _, msg := range messages {
+		if msg.Type != "devin_message" || msg.Content == "" {
+			continue
+		}
+		b.WriteString(msg.Content)
+		b.WriteString("\n\n")
+	}
+	return b.String()
+}
+
 // formatQAResult formats the QA session result into a readable text summary.
-func formatQAResult(sessionID, sessionURL string, status *devin.SessionStatus) string {
+func formatQAResult(sessionID, sessionURL string, status *devin.SessionStatus, messages []devin.Message) string {
 	var b strings.Builder
 	b.WriteString("=== Devin QA Review Complete ===\n\n")
 	b.WriteString(fmt.Sprintf("Session: %s\n", sessionID))
@@ -392,6 +413,11 @@ func formatQAResult(sessionID, sessionURL string, status *devin.SessionStatus) s
 		b.WriteString(fmt.Sprintf("Title: %s\n\n", status.Title))
 	}
 
+	if msgText := formatMessages(messages); msgText != "" {
+		b.WriteString("--- Devin's Response ---\n\n")
+		b.WriteString(msgText)
+	}
+
 	b.WriteString("View the full Devin session for detailed findings: ")
 	b.WriteString(sessionURL)
 	b.WriteString("\n")
@@ -400,7 +426,7 @@ func formatQAResult(sessionID, sessionURL string, status *devin.SessionStatus) s
 }
 
 // formatReviewResult formats the code review session result into a readable text summary.
-func formatReviewResult(sessionID, sessionURL string, status *devin.SessionStatus) string {
+func formatReviewResult(sessionID, sessionURL string, status *devin.SessionStatus, messages []devin.Message) string {
 	var b strings.Builder
 	b.WriteString("=== Devin Code Review Complete ===\n\n")
 	b.WriteString(fmt.Sprintf("Session: %s\n", sessionID))
@@ -421,6 +447,11 @@ func formatReviewResult(sessionID, sessionURL string, status *devin.SessionStatu
 		b.WriteString("\n")
 	}
 
+	if msgText := formatMessages(messages); msgText != "" {
+		b.WriteString("--- Devin's Response ---\n\n")
+		b.WriteString(msgText)
+	}
+
 	b.WriteString("Review comments have been posted directly on the GitHub PR.\n")
 	b.WriteString("View the full Devin session: ")
 	b.WriteString(sessionURL)
@@ -430,7 +461,7 @@ func formatReviewResult(sessionID, sessionURL string, status *devin.SessionStatu
 }
 
 // formatDevelopResult formats the development session result into a readable text summary.
-func formatDevelopResult(sessionID, sessionURL string, status *devin.SessionStatus) string {
+func formatDevelopResult(sessionID, sessionURL string, status *devin.SessionStatus, messages []devin.Message) string {
 	var b strings.Builder
 	b.WriteString("=== Devin Development Complete ===\n\n")
 	b.WriteString(fmt.Sprintf("Session: %s\n", sessionID))
@@ -449,6 +480,11 @@ func formatDevelopResult(sessionID, sessionURL string, status *devin.SessionStat
 		b.WriteString("Pull Requests:\n")
 		b.WriteString(prs)
 		b.WriteString("\n")
+	}
+
+	if msgText := formatMessages(messages); msgText != "" {
+		b.WriteString("--- Devin's Response ---\n\n")
+		b.WriteString(msgText)
 	}
 
 	b.WriteString("View the full Devin session for details: ")
