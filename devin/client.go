@@ -240,7 +240,7 @@ func (c *Client) PollUntilDone(ctx context.Context, sessionID string, pollInterv
 
 			// Primary terminal states (session is no longer running)
 			switch status.Status {
-			case "exit", "error", "suspended", "sleeping":
+			case "exit", "error", "suspended", "sleeping", "waiting_for_user":
 				return status, nil
 			}
 
