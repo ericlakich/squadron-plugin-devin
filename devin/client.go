@@ -12,8 +12,7 @@ import (
 )
 
 const (
-	baseURL   = "https://api.devin.ai/v3"
-	v1BaseURL = "https://api.devin.ai/v1"
+	baseURL = "https://api.devin.ai/v3"
 
 	// Polling configuration
 	defaultPollInterval = 15 * time.Second
@@ -145,20 +144,14 @@ func (c *Client) GetSession(ctx context.Context, sessionID string) (*SessionStat
 	return &result, nil
 }
 
-// v1SessionResponse is the response from the v1 GET session endpoint,
-// which includes messages in the response body (unlike the v3 endpoint).
-type v1SessionResponse struct {
-	Messages []Message `json:"messages"`
-}
-
-// GetMessages retrieves the message history for a Devin session.
+// GetMessages retrieves the message history for a Devin session via the v3
+// organization-scoped messages endpoint:
 //
-// The v3 API does not provide a GET endpoint for session messages, so this
-// falls back to the v1 API (GET /v1/sessions/{id}) which includes a messages
-// array directly in the session response. The v1 endpoint accepts service
-// user tokens (cog_) used by v3.
+//	GET /v3/organizations/{org_id}/sessions/{session_id}/messages
+//
+// See https://docs.devin.ai/api-reference/v3/sessions/get-organizations-session-messages
 func (c *Client) GetMessages(ctx context.Context, sessionID string) ([]Message, error) {
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, v1BaseURL+"/sessions/"+sessionID, nil)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, c.orgURL()+"/sessions/"+sessionID+"/messages", nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
@@ -175,11 +168,104 @@ func (c *Client) GetMessages(ctx context.Context, sessionID string) ([]Message, 
 		return nil, fmt.Errorf("devin API error (status %d): %s", resp.StatusCode, string(respBody))
 	}
 
-	var result v1SessionResponse
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	// Try decoding as a bare JSON array of messages.
+	var msgs []Message
+	if err := json.Unmarshal(body, &msgs); err == nil {
+		return msgs, nil
+	}
+
+	// Try decoding as an object with a "messages" field.
+	var wrapped struct {
+		Messages []Message `json:"messages"`
+	}
+	if err := json.Unmarshal(body, &wrapped); err == nil {
+		return wrapped.Messages, nil
+	}
+
+	// Include raw body (truncated) in the error for debugging.
+	preview := string(body)
+	if len(preview) > 500 {
+		preview = preview[:500] + "..."
+	}
+	return nil, fmt.Errorf("unable to parse messages response: %s", preview)
+}
+
+// SessionInsight contains enriched session data from the insights endpoint,
+// including analysis with action items, issues, timeline, and classification.
+type SessionInsight struct {
+	SessionID        string            `json:"session_id"`
+	Status           string            `json:"status"`
+	StatusDetail     string            `json:"status_detail"`
+	Title            string            `json:"title"`
+	URL              string            `json:"url"`
+	PullRequests     []PullRequest     `json:"pull_requests,omitempty"`
+	IsArchived       bool              `json:"is_archived"`
+	ACUsConsumed     float64           `json:"acus_consumed"`
+	StructuredOutput json.RawMessage   `json:"structured_output,omitempty"`
+	Analysis         *SessionAnalysis  `json:"analysis,omitempty"`
+}
+
+// SessionAnalysis contains the AI-generated analysis of a session.
+type SessionAnalysis struct {
+	ActionItems    []string                `json:"action_items,omitempty"`
+	Issues         []string                `json:"issues,omitempty"`
+	Timeline       []string                `json:"timeline,omitempty"`
+	Classification *SessionClassification  `json:"classification,omitempty"`
+}
+
+// SessionClassification describes the category and technologies of a session.
+type SessionClassification struct {
+	Category             string   `json:"category"`
+	Confidence           float64  `json:"confidence"`
+	ProgrammingLanguages []string `json:"programming_languages,omitempty"`
+	ToolsAndFrameworks   []string `json:"tools_and_frameworks,omitempty"`
+}
+
+// insightsResponse is the paginated response from the session insights endpoint.
+type insightsResponse struct {
+	Items       []SessionInsight `json:"items"`
+	EndCursor   string           `json:"end_cursor"`
+	HasNextPage bool             `json:"has_next_page"`
+}
+
+// GetSessionInsights retrieves enriched session data including analysis from
+// the organization-scoped insights endpoint, filtered to a single session.
+//
+//	GET /v3/organizations/{org_id}/sessions/insights?session_ids={session_id}
+func (c *Client) GetSessionInsights(ctx context.Context, sessionID string) (*SessionInsight, error) {
+	url := c.orgURL() + "/sessions/insights?session_ids=" + sessionID
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("devin API error (status %d): %s", resp.StatusCode, string(respBody))
+	}
+
+	var result insightsResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("decode response: %w", err)
 	}
-	return result.Messages, nil
+
+	if len(result.Items) == 0 {
+		return nil, fmt.Errorf("no insights found for session %s", sessionID)
+	}
+
+	return &result.Items[0], nil
 }
 
 // ArchiveSession archives a completed Devin session.
