@@ -78,13 +78,6 @@ type PullRequest struct {
 	State string `json:"pr_state"`
 }
 
-// Message represents a single message in a Devin session conversation.
-type Message struct {
-	Type      string `json:"type"`
-	EventID   string `json:"event_id"`
-	Content   string `json:"message"`
-	Timestamp string `json:"timestamp"`
-}
 
 // CreateSession creates a new Devin session with the given prompt.
 func (c *Client) CreateSession(ctx context.Context, req CreateSessionRequest) (*CreateSessionResponse, error) {
@@ -144,55 +137,39 @@ func (c *Client) GetSession(ctx context.Context, sessionID string) (*SessionStat
 	return &result, nil
 }
 
-// GetMessages retrieves the message history for a Devin session via the v3
-// organization-scoped messages endpoint:
+// GetMessages retrieves the raw message history JSON for a Devin session
+// via the v3 organization-scoped messages endpoint:
 //
 //	GET /v3/organizations/{org_id}/sessions/{session_id}/messages
 //
+// The entire JSON response is returned as-is so the calling agent can
+// parse and interpret the conversation directly.
+//
 // See https://docs.devin.ai/api-reference/v3/sessions/get-organizations-session-messages
-func (c *Client) GetMessages(ctx context.Context, sessionID string) ([]Message, error) {
+func (c *Client) GetMessages(ctx context.Context, sessionID string) (string, error) {
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, c.orgURL()+"/sessions/"+sessionID+"/messages", nil)
 	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
+		return "", fmt.Errorf("create request: %w", err)
 	}
 	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("send request: %w", err)
+		return "", fmt.Errorf("send request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("devin API error (status %d): %s", resp.StatusCode, string(respBody))
+		return "", fmt.Errorf("devin API error (status %d): %s", resp.StatusCode, string(respBody))
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("read response: %w", err)
+		return "", fmt.Errorf("read response: %w", err)
 	}
 
-	// Try decoding as a bare JSON array of messages.
-	var msgs []Message
-	if err := json.Unmarshal(body, &msgs); err == nil {
-		return msgs, nil
-	}
-
-	// Try decoding as an object with a "messages" field.
-	var wrapped struct {
-		Messages []Message `json:"messages"`
-	}
-	if err := json.Unmarshal(body, &wrapped); err == nil {
-		return wrapped.Messages, nil
-	}
-
-	// Include raw body (truncated) in the error for debugging.
-	preview := string(body)
-	if len(preview) > 500 {
-		preview = preview[:500] + "..."
-	}
-	return nil, fmt.Errorf("unable to parse messages response: %s", preview)
+	return string(body), nil
 }
 
 // SessionInsight contains enriched session data from the insights endpoint,

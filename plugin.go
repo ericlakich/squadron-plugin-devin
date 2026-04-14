@@ -429,24 +429,9 @@ func formatPullRequests(prs []devin.PullRequest) string {
 	return b.String()
 }
 
-// formatMessages formats Devin's messages into a readable conversation log.
-// It includes only devin_message entries (Devin's own responses), skipping
-// user_message entries (our prompts).
-func formatMessages(messages []devin.Message) string {
-	var b strings.Builder
-	for _, msg := range messages {
-		if msg.Type != "devin_message" || msg.Content == "" {
-			continue
-		}
-		b.WriteString(msg.Content)
-		b.WriteString("\n\n")
-	}
-	return b.String()
-}
-
 // formatDevinResponse writes the "--- Devin's Response ---" section with
-// appropriate content based on whether messages were retrieved successfully.
-func formatDevinResponse(b *strings.Builder, sessionURL string, messages []devin.Message, msgErr error) {
+// the raw messages JSON payload or an appropriate fallback.
+func formatDevinResponse(b *strings.Builder, sessionURL string, messagesJSON string, msgErr error) {
 	b.WriteString("--- Devin's Response ---\n\n")
 	if msgErr != nil {
 		b.WriteString("Devin returned an error in messaging. Review this session at ")
@@ -454,15 +439,16 @@ func formatDevinResponse(b *strings.Builder, sessionURL string, messages []devin
 		b.WriteString("\nError detail: ")
 		b.WriteString(msgErr.Error())
 		b.WriteString("\n")
-	} else if msgText := formatMessages(messages); msgText != "" {
-		b.WriteString(msgText)
+	} else if messagesJSON != "" {
+		b.WriteString(messagesJSON)
+		b.WriteString("\n")
 	} else {
 		b.WriteString("Devin did not return a message. Continue to the next task.\n")
 	}
 }
 
 // formatQAResult formats the QA session result into a readable text summary.
-func formatQAResult(sessionID, sessionURL string, status *devin.SessionStatus, messages []devin.Message, msgErr error) string {
+func formatQAResult(sessionID, sessionURL string, status *devin.SessionStatus, messagesJSON string, msgErr error) string {
 	var b strings.Builder
 	b.WriteString("=== Devin QA Review Complete ===\n\n")
 	b.WriteString(fmt.Sprintf("Session: %s\n", sessionID))
@@ -477,7 +463,7 @@ func formatQAResult(sessionID, sessionURL string, status *devin.SessionStatus, m
 		b.WriteString(fmt.Sprintf("Title: %s\n\n", status.Title))
 	}
 
-	formatDevinResponse(&b, sessionURL, messages, msgErr)
+	formatDevinResponse(&b, sessionURL, messagesJSON, msgErr)
 
 	b.WriteString("\nView the full Devin session for detailed findings: ")
 	b.WriteString(sessionURL)
@@ -487,7 +473,7 @@ func formatQAResult(sessionID, sessionURL string, status *devin.SessionStatus, m
 }
 
 // formatReviewResult formats the code review session result into a readable text summary.
-func formatReviewResult(sessionID, sessionURL string, status *devin.SessionStatus, messages []devin.Message, msgErr error) string {
+func formatReviewResult(sessionID, sessionURL string, status *devin.SessionStatus, messagesJSON string, msgErr error) string {
 	var b strings.Builder
 	b.WriteString("=== Devin Code Review Complete ===\n\n")
 	b.WriteString(fmt.Sprintf("Session: %s\n", sessionID))
@@ -508,7 +494,7 @@ func formatReviewResult(sessionID, sessionURL string, status *devin.SessionStatu
 		b.WriteString("\n")
 	}
 
-	formatDevinResponse(&b, sessionURL, messages, msgErr)
+	formatDevinResponse(&b, sessionURL, messagesJSON, msgErr)
 
 	b.WriteString("\nReview comments have been posted directly on the GitHub PR.\n")
 	b.WriteString("View the full Devin session: ")
@@ -519,7 +505,7 @@ func formatReviewResult(sessionID, sessionURL string, status *devin.SessionStatu
 }
 
 // formatDevelopResult formats the development session result into a readable text summary.
-func formatDevelopResult(sessionID, sessionURL string, status *devin.SessionStatus, messages []devin.Message, msgErr error) string {
+func formatDevelopResult(sessionID, sessionURL string, status *devin.SessionStatus, messagesJSON string, msgErr error) string {
 	var b strings.Builder
 	b.WriteString("=== Devin Development Complete ===\n\n")
 	b.WriteString(fmt.Sprintf("Session: %s\n", sessionID))
@@ -540,7 +526,7 @@ func formatDevelopResult(sessionID, sessionURL string, status *devin.SessionStat
 		b.WriteString("\n")
 	}
 
-	formatDevinResponse(&b, sessionURL, messages, msgErr)
+	formatDevinResponse(&b, sessionURL, messagesJSON, msgErr)
 
 	b.WriteString("\nView the full Devin session for details: ")
 	b.WriteString(sessionURL)
@@ -550,7 +536,7 @@ func formatDevelopResult(sessionID, sessionURL string, status *devin.SessionStat
 }
 
 // formatCheckSessionResult formats a session status check into a readable text summary.
-func formatCheckSessionResult(sessionID string, status *devin.SessionStatus, messages []devin.Message, msgErr error, insights *devin.SessionInsight) string {
+func formatCheckSessionResult(sessionID string, status *devin.SessionStatus, messagesJSON string, msgErr error, insights *devin.SessionInsight) string {
 	var b strings.Builder
 	b.WriteString("=== Devin Session Status ===\n\n")
 	b.WriteString(fmt.Sprintf("Session: %s\n", sessionID))
@@ -578,7 +564,7 @@ func formatCheckSessionResult(sessionID string, status *devin.SessionStatus, mes
 	if sessionURL == "" {
 		sessionURL = "https://app.devin.ai/sessions/" + sessionID
 	}
-	formatDevinResponse(&b, sessionURL, messages, msgErr)
+	formatDevinResponse(&b, sessionURL, messagesJSON, msgErr)
 
 	if insights != nil {
 		formatInsights(&b, insights)
