@@ -147,7 +147,8 @@ func (c *Client) GetSession(ctx context.Context, sessionID string) (*SessionStat
 //
 // See https://docs.devin.ai/api-reference/v3/sessions/get-organizations-session-messages
 func (c *Client) GetMessages(ctx context.Context, sessionID string) (string, error) {
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, c.orgURL()+"/sessions/"+sessionID+"/messages", nil)
+	url := c.orgURL() + "/sessions/" + sessionID + "/messages"
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return "", fmt.Errorf("create request: %w", err)
 	}
@@ -155,18 +156,21 @@ func (c *Client) GetMessages(ctx context.Context, sessionID string) (string, err
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		return "", fmt.Errorf("send request: %w", err)
+		return "", fmt.Errorf("send request to %s: %w", url, err)
 	}
 	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("devin API error (status %d): %s", resp.StatusCode, string(respBody))
-	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("devin API error (status %d): %s", resp.StatusCode, string(body))
+	}
+
+	if len(body) == 0 {
+		return "", fmt.Errorf("devin API returned empty response (status %d) from %s", resp.StatusCode, url)
 	}
 
 	return string(body), nil
